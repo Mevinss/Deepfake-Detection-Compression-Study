@@ -1,0 +1,48 @@
+# Training and evaluation configuration
+# ─────────────────────────────────────────────────────────────────────────────
+# Paths
+# ─────────────────────────────────────────────────────────────────────────────
+data:
+  # Each directory must contain 'real/' and 'fake/' subdirectories
+  train_dir: data/train
+  val_dir:   data/val
+  test_dir:  data/test
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Model
+# ─────────────────────────────────────────────────────────────────────────────
+model:
+  # One of: mobilenetv3 | efficientnet_b0 | ghostnet
+  name:         mobilenetv3
+  pretrained:   true
+  use_attention: true
+  hidden_dim:   256
+  dropout:      0.3
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Training hyper-parameters
+# ─────────────────────────────────────────────────────────────────────────────
+image_size:    224
+batch_size:    32
+num_workers:   4
+epochs:        20
+lr:            0.0001
+weight_decay:  0.0001
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging & checkpoints
+# ─────────────────────────────────────────────────────────────────────────────
+log_dir:        runs
+checkpoint_dir: checkpoints
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Robustness evaluation
+# ─────────────────────────────────────────────────────────────────────────────
+# CRF=0 means "no compression" baseline
+crf_levels:    [0, 23, 32, 40]
+
+# Models to include in the robustness comparison plot
+eval_models:
+  - mobilenetv3
+  - efficientnet_b0
+  - ghostnet
