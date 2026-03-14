@@ -20,6 +20,14 @@ checkpoints/
 runs/
 results/
 
+# Web app uploads
+uploads/
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
 # Jupyter notebooks checkpoints
 .ipynb_checkpoints/
 

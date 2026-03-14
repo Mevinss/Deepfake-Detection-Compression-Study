@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Детекция Дипфейков - Загрузите видео</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 800px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 60px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #f8f9ff;
+            margin-bottom: 20px;
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f1ff;
+            transform: translateY(-2px);
+        }
+
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: #e8e9ff;
+        }
+
+        .upload-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+        }
+
+        .upload-text {
+            color: #555;
+            font-size: 1.2em;
+            margin-bottom: 10px;
+        }
+
+        .upload-hint {
+            color: #888;
+            font-size: 0.9em;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .file-name {
+            text-align: center;
+            color: #667eea;
+            font-weight: bold;
+            margin: 15px 0;
+            font-size: 1.1em;
+        }
+
+        .analyze-btn {
+            width: 100%;
+            padding: 18px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.2em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 20px;
+        }
+
+        .analyze-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        .analyze-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 30px 0;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: #667eea;
+            font-size: 1.1em;
+        }
+
+        .result {
+            display: none;
+            margin-top: 30px;
+            padding: 30px;
+            border-radius: 15px;
+            animation: slideIn 0.5s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .result.real {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+        }
+
+        .result.fake {
+            background: linear-gradient(135deg, #ee0979 0%, #ff6a00 100%);
+            color: white;
+        }
+
+        .result-icon {
+            font-size: 4em;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .result-title {
+            font-size: 2em;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        .result-confidence {
+            text-align: center;
+            font-size: 1.3em;
+            margin-bottom: 20px;
+        }
+
+        .result-details {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            font-size: 1.1em;
+        }
+
+        .sample-frame {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .sample-frame img {
+            max-width: 100%;
+            border-radius: 10px;
+            border: 3px solid rgba(255, 255, 255, 0.5);
+        }
+
+        .error {
+            display: none;
+            background: #ff4444;
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        .reset-btn {
+            width: 100%;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.3);
+            color: white;
+            border: 2px solid white;
+            border-radius: 10px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .reset-btn:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .info-box {
+            background: #f0f7ff;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 5px;
+        }
+
+        .info-box h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .info-box p {
+            color: #555;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎭 Детекция Дипфейков</h1>
+        <p class="subtitle">Загрузите видео для проверки на подлинность</p>
+
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📹</div>
+            <div class="upload-text">Нажмите или перетащите видео сюда</div>
+            <div class="upload-hint">Поддерживаемые форматы: MP4, AVI, MOV, MKV, WEBM (макс. 100 МБ)</div>
+        </div>
+
+        <input type="file" id="fileInput" accept="video/*">
+        
+        <div class="file-name" id="fileName" style="display: none;"></div>
+
+        <button class="analyze-btn" id="analyzeBtn" disabled>
+            Анализировать видео
+        </button>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <div class="loading-text">Анализ видео... Это может занять некоторое время</div>
+        </div>
+
+        <div class="error" id="error"></div>
+
+        <div class="result" id="result">
+            <div class="result-icon" id="resultIcon"></div>
+            <div class="result-title" id="resultTitle"></div>
+            <div class="result-confidence" id="resultConfidence"></div>
+            
+            <div class="result-details">
+                <div class="detail-row">
+                    <span>Вероятность реального:</span>
+                    <span id="realProb"></span>
+                </div>
+                <div class="detail-row">
+                    <span>Вероятность дипфейка:</span>
+                    <span id="fakeProb"></span>
+                </div>
+                <div class="detail-row">
+                    <span>Проанализировано кадров:</span>
+                    <span id="framesAnalyzed"></span>
+                </div>
+            </div>
+
+            <div class="sample-frame" id="sampleFrame" style="display: none;">
+                <h3 style="margin-bottom: 10px;">Пример кадра:</h3>
+                <img id="sampleImage" src="" alt="Sample frame">
+            </div>
+
+            <button class="reset-btn" onclick="resetUpload()">
+                Загрузить другое видео
+            </button>
+        </div>
+
+        <div class="info-box">
+            <h3>ℹ️ О системе</h3>
+            <p>
+                Эта система использует глубокие нейронные сети для обнаружения дипфейков в видео.
+                Модель анализирует лица в кадрах и определяет признаки искусственной генерации.
+                Для наилучших результатов используйте видео с четко видимыми лицами.
+            </p>
+        </div>
+
+        <div class="footer">
+            <p>Deepfake Detection System © 2024</p>
+            <p>Powered by MobileNetV3 + PyTorch</p>
+        </div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileName = document.getElementById('fileName');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const loading = document.getElementById('loading');
+        const result = document.getElementById('result');
+        const error = document.getElementById('error');
+
+        let selectedFile = null;
+
+        // Click to upload
+        uploadArea.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        // Drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelect(files[0]);
+            }
+        });
+
+        // File input change
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileSelect(e.target.files[0]);
+            }
+        });
+
+        function handleFileSelect(file) {
+            // Check file type
+            const validTypes = ['video/mp4', 'video/avi', 'video/quicktime', 'video/x-matroska', 'video/webm'];
+            if (!validTypes.includes(file.type) && !file.name.match(/\.(mp4|avi|mov|mkv|webm)$/i)) {
+                showError('Неподдерживаемый формат файла. Используйте: MP4, AVI, MOV, MKV, WEBM');
+                return;
+            }
+
+            // Check file size (100MB)
+            if (file.size > 100 * 1024 * 1024) {
+                showError('Файл слишком большой. Максимальный размер: 100 МБ');
+                return;
+            }
+
+            selectedFile = file;
+            fileName.textContent = `📁 ${file.name}`;
+            fileName.style.display = 'block';
+            analyzeBtn.disabled = false;
+            
+            // Hide previous results
+            result.style.display = 'none';
+            error.style.display = 'none';
+        }
+
+        // Analyze button
+        analyzeBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            // Show loading
+            loading.style.display = 'block';
+            analyzeBtn.disabled = true;
+            result.style.display = 'none';
+            error.style.display = 'none';
+
+            // Create form data
+            const formData = new FormData();
+            formData.append('video', selectedFile);
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                loading.style.display = 'none';
+
+                if (response.ok && !data.error) {
+                    showResult(data);
+                } else {
+                    showError(data.error || 'Произошла ошибка при анализе видео');
+                }
+            } catch (err) {
+                loading.style.display = 'none';
+                showError('Ошибка соединения с сервером: ' + err.message);
+            }
+        });
+
+        function showResult(data) {
+            result.style.display = 'block';
+            
+            if (data.is_deepfake) {
+                result.className = 'result fake';
+                document.getElementById('resultIcon').textContent = '⚠️';
+                document.getElementById('resultTitle').textContent = 'ОБНАРУЖЕН ДИПФЕЙК!';
+            } else {
+                result.className = 'result real';
+                document.getElementById('resultIcon').textContent = '✅';
+                document.getElementById('resultTitle').textContent = 'РЕАЛЬНОЕ ВИДЕО';
+            }
+
+            document.getElementById('resultConfidence').textContent = 
+                `Уверенность: ${data.confidence.toFixed(1)}%`;
+            document.getElementById('realProb').textContent = 
+                `${data.probabilities.real.toFixed(1)}%`;
+            document.getElementById('fakeProb').textContent = 
+                `${data.probabilities.fake.toFixed(1)}%`;
+            document.getElementById('framesAnalyzed').textContent = 
+                data.frames_analyzed;
+
+            // Show sample frame if available
+            if (data.sample_frame) {
+                document.getElementById('sampleFrame').style.display = 'block';
+                document.getElementById('sampleImage').src = 
+                    'data:image/jpeg;base64,' + data.sample_frame;
+            }
+        }
+
+        function showError(message) {
+            error.textContent = '❌ ' + message;
+            error.style.display = 'block';
+            analyzeBtn.disabled = false;
+        }
+
+        function resetUpload() {
+            selectedFile = null;
+            fileInput.value = '';
+            fileName.style.display = 'none';
+            result.style.display = 'none';
+            error.style.display = 'none';
+            analyzeBtn.disabled = true;
+        }
+    </script>
+</body>
+</html>

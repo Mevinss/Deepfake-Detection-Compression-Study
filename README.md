@@ -1,8 +1,29 @@
-# Deepfake Detection — Compression Robustness Study
+# Deepfake Detection — Web Application & Compression Study
 
-> **Исследование устойчивости легковесных архитектур нейросетей к видеокомпрессии при детекции дипфейков.**
+> **Complete deepfake detection web application with video upload and real-time analysis.**  
+> **Полноценное веб-приложение для детекции дипфейков с загрузкой видео и анализом в реальном времени.**
 
-This project benchmarks three lightweight CNN architectures — **MobileNetV3-Large**, **EfficientNet-B0**, and **GhostNet** — for their ability to detect deepfake faces after H.264 video compression at varying Constant Rate Factor (CRF) levels (23, 32, 40).
+🌐 **[Русская версия документации](README_RU.md)** | 🚀 **[Quick Start (RU)](QUICKSTART_RU.md)**
+
+This project provides a web interface for deepfake detection in videos. It benchmarks three lightweight CNN architectures — **MobileNetV3-Large**, **EfficientNet-B0**, and **GhostNet** — for their ability to detect deepfake faces after H.264 video compression at varying Constant Rate Factor (CRF) levels (23, 32, 40).
+
+---
+
+## 🚀 Quick Start
+
+```bash
+# Clone and install
+git clone https://github.com/Mevinss/Deepfake-Detection-Compression-Study.git
+cd Deepfake-Detection-Compression-Study
+pip install -r requirements.txt
+
+# Run web application
+python app.py
+
+# Open browser: http://127.0.0.1:5000
+```
+
+**📖 For detailed instructions in Russian, see [QUICKSTART_RU.md](QUICKSTART_RU.md)**
 
 ---
 
