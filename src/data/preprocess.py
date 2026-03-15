@@ -36,32 +36,75 @@ from albumentations.pytorch import ToTensorV2
 # ---------------------------------------------------------------------------
 
 class MediaPipeFaceDetector:
-    """Face detector backed by MediaPipe."""
+    """Face detector backed by MediaPipe or OpenCV fallback."""
 
     def __init__(self, min_detection_confidence: float = 0.5):
         if not MEDIAPIPE_AVAILABLE:
             raise ImportError("mediapipe is not installed. Run: pip install mediapipe")
-        mp_face = mp.solutions.face_detection
-        self._detector = mp_face.FaceDetection(
-            model_selection=1,
-            min_detection_confidence=min_detection_confidence,
-        )
+        
+        # Try new MediaPipe API (0.10.32+)
+        try:
+            from mediapipe.tasks import python
+            from mediapipe.tasks.python import vision
+            
+            # Use the new tasks API
+            base_options = python.BaseOptions(
+                model_asset_path=None  # Uses default model
+            )
+            options = vision.FaceDetectorOptions(
+                base_options=base_options,
+                min_detection_confidence=min_detection_confidence
+            )
+            self._detector = vision.FaceDetector.create_from_options(options)
+            self._use_new_api = True
+            print("✓ Using new MediaPipe tasks API")
+        except (ImportError, AttributeError, Exception) as e:
+            # Fall back to OpenCV Haar Cascade
+            print(f"⚠ MediaPipe new API not available ({e}), falling back to OpenCV")
+            self._detector = cv2.CascadeClassifier(
+                cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            )
+            self._use_new_api = False
 
     def detect(self, frame_rgb: np.ndarray) -> List[Tuple[int, int, int, int]]:
         """Return list of (x, y, w, h) bounding boxes in pixel coordinates."""
-        results = self._detector.process(frame_rgb)
-        boxes: List[Tuple[int, int, int, int]] = []
-        if not results.detections:
-            return boxes
-        h, w = frame_rgb.shape[:2]
-        for det in results.detections:
-            bb = det.location_data.relative_bounding_box
-            x = max(0, int(bb.xmin * w))
-            y = max(0, int(bb.ymin * h))
-            bw = min(int(bb.width * w), w - x)
-            bh = min(int(bb.height * h), h - y)
-            boxes.append((x, y, bw, bh))
-        return boxes
+        if self._use_new_api:
+            # New MediaPipe API
+            try:
+                import mediapipe as mp
+                # Convert to MediaPipe Image format
+                mp_image = mp.Image(
+                    image_format=mp.ImageFormat.SRGB,
+                    data=frame_rgb
+                )
+                results = self._detector.detect(mp_image)
+                boxes: List[Tuple[int, int, int, int]] = []
+                if not results.detections:
+                    return boxes
+                h, w = frame_rgb.shape[:2]
+                for det in results.detections:
+                    bb = det.bounding_box
+                    x = max(0, bb.origin_x)
+                    y = max(0, bb.origin_y)
+                    bw = min(bb.width, w - x)
+                    bh = min(bb.height, h - y)
+                    boxes.append((x, y, bw, bh))
+                return boxes
+            except Exception as e:
+                print(f"Error with new MediaPipe API: {e}, using OpenCV fallback")
+                # Fall through to OpenCV
+                pass
+        
+        # OpenCV Haar Cascade fallback
+        gray = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2GRAY)
+        faces = self._detector.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=5,
+            minSize=(30, 30)
+        )
+        # Convert to list of tuples
+        return [(int(x), int(y), int(w), int(h)) for x, y, w, h in faces]
 
 
 class MTCNNFaceDetector:

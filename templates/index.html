@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Детекция Дипфейков - Загрузите видео</title>
+    <title>Deepfake Detection System - AI-Powered Video Analysis</title>
     <style>
         * {
             margin: 0;
@@ -13,57 +13,90 @@
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #ffffff 0%, #e3f2fd 50%, #bbdefb 100%);
             min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
             padding: 20px;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1976d2 0%, #2196f3 100%);
+            color: white;
+            padding: 30px 20px;
+            text-align: center;
+            border-radius: 15px;
+            box-shadow: 0 4px 20px rgba(25, 118, 210, 0.3);
+            margin-bottom: 30px;
+            max-width: 1200px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .header h1 {
+            font-size: 2.8em;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }
+
+        .header .project-info {
+            font-size: 1.2em;
+            opacity: 0.95;
+            line-height: 1.6;
+            margin-top: 10px;
+        }
+
+        .header .year {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-top: 15px;
+            font-weight: 300;
         }
 
         .container {
             background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            max-width: 800px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            max-width: 1200px;
             width: 100%;
             padding: 40px;
+            margin: 0 auto;
+            border: 2px solid #e3f2fd;
         }
 
-        h1 {
-            color: #333;
+        h2 {
+            color: #1976d2;
             text-align: center;
             margin-bottom: 10px;
-            font-size: 2.5em;
+            font-size: 2em;
+            font-weight: 600;
         }
 
         .subtitle {
             text-align: center;
-            color: #666;
+            color: #546e7a;
             margin-bottom: 30px;
             font-size: 1.1em;
         }
 
         .upload-area {
-            border: 3px dashed #667eea;
+            border: 3px dashed #2196f3;
             border-radius: 15px;
             padding: 60px 20px;
             text-align: center;
             cursor: pointer;
             transition: all 0.3s ease;
-            background: #f8f9ff;
+            background: #f5f9ff;
             margin-bottom: 20px;
         }
 
         .upload-area:hover {
-            border-color: #764ba2;
-            background: #f0f1ff;
+            border-color: #1976d2;
+            background: #e3f2fd;
             transform: translateY(-2px);
         }
 
         .upload-area.dragover {
-            border-color: #764ba2;
-            background: #e8e9ff;
+            border-color: #1976d2;
+            background: #bbdefb;
         }
 
         .upload-icon {
@@ -88,7 +121,7 @@
 
         .file-name {
             text-align: center;
-            color: #667eea;
+            color: #1976d2;
             font-weight: bold;
             margin: 15px 0;
             font-size: 1.1em;
@@ -97,7 +130,7 @@
         .analyze-btn {
             width: 100%;
             padding: 18px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #1976d2 0%, #2196f3 100%);
             color: white;
             border: none;
             border-radius: 10px;
@@ -110,7 +143,7 @@
 
         .analyze-btn:hover:not(:disabled) {
             transform: translateY(-2px);
-            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 10px 25px rgba(25, 118, 210, 0.4);
         }
 
         .analyze-btn:disabled {
@@ -125,8 +158,8 @@
         }
 
         .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
+            border: 4px solid #e3f2fd;
+            border-top: 4px solid #2196f3;
             border-radius: 50%;
             width: 50px;
             height: 50px;
@@ -140,7 +173,7 @@
         }
 
         .loading-text {
-            color: #667eea;
+            color: #1976d2;
             font-size: 1.1em;
         }
 
@@ -253,36 +286,70 @@
         }
 
         .info-box {
-            background: #f0f7ff;
-            border-left: 4px solid #667eea;
-            padding: 15px;
-            margin-top: 20px;
-            border-radius: 5px;
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 20px;
+            margin-top: 25px;
+            border-radius: 8px;
         }
 
         .info-box h3 {
-            color: #667eea;
-            margin-bottom: 10px;
+            color: #1976d2;
+            margin-bottom: 12px;
+            font-size: 1.3em;
         }
 
         .info-box p {
-            color: #555;
-            line-height: 1.6;
+            color: #455a64;
+            line-height: 1.8;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding: 25px;
+            background: linear-gradient(135deg, #1976d2 0%, #2196f3 100%);
+            color: white;
+            border-radius: 10px;
+        }
+
+        .footer p {
+            margin: 8px 0;
+            font-size: 1em;
+        }
+
+        .footer .copyright {
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+
+        .footer .tech {
+            opacity: 0.9;
+            font-size: 0.95em;
         }
     </style>
 </head>
 <body>
+    <div class="header">
+        <h1>🎭 Deepfake Detection System</h1>
+        <div class="project-info">
+            AI-Powered Video Analysis for Authenticity Verification<br>
+            Система детекции дипфейков на основе глубокого обучения
+        </div>
+        <div class="year">© 2026 | Advanced Computer Vision Project</div>
+    </div>
+
     <div class="container">
-        <h1>🎭 Детекция Дипфейков</h1>
-        <p class="subtitle">Загрузите видео для проверки на подлинность</p>
+        <h2>📹 Анализ видео</h2>
+        <p class="subtitle">Загрузите видео или GIF для проверки на подлинность</p>
 
         <div class="upload-area" id="uploadArea">
             <div class="upload-icon">📹</div>
-            <div class="upload-text">Нажмите или перетащите видео сюда</div>
-            <div class="upload-hint">Поддерживаемые форматы: MP4, AVI, MOV, MKV, WEBM (макс. 100 МБ)</div>
+            <div class="upload-text">Нажмите или перетащите видео/GIF сюда</div>
+            <div class="upload-hint">Поддерживаемые форматы: MP4, AVI, MOV, MKV, WEBM, GIF (макс. 100 МБ)</div>
         </div>
 
-        <input type="file" id="fileInput" accept="video/*">
+        <input type="file" id="fileInput" accept="video/*,image/gif,.gif">
         
         <div class="file-name" id="fileName" style="display: none;"></div>
 
@@ -330,15 +397,18 @@
         <div class="info-box">
             <h3>ℹ️ О системе</h3>
             <p>
-                Эта система использует глубокие нейронные сети для обнаружения дипфейков в видео.
-                Модель анализирует лица в кадрах и определяет признаки искусственной генерации.
-                Для наилучших результатов используйте видео с четко видимыми лицами.
+                <strong>Deepfake Detection & Compression Study</strong> — это современная система для обнаружения дипфейков в видео и изображениях.
+                Используя передовые алгоритмы глубокого обучения (MobileNetV3, EfficientNet, GhostNet), 
+                система анализирует визуальные артефакты и признаки искусственной генерации лиц.
+                Модель обучена на больших датасетах и способна определять как традиционные методы подделки,
+                так и современные GAN-генерированные изображения.
             </p>
         </div>
 
         <div class="footer">
-            <p>Deepfake Detection System © 2024</p>
-            <p>Powered by MobileNetV3 + PyTorch</p>
+            <p class="copyright">Deepfake Detection System © 2026</p>
+            <p class="tech">Powered by PyTorch • MobileNetV3 • MediaPipe • Flask</p>
+            <p class="tech">Compression Robustness Study Project</p>
         </div>
     </div>
 
@@ -386,10 +456,12 @@
         });
 
         function handleFileSelect(file) {
-            // Check file type
-            const validTypes = ['video/mp4', 'video/avi', 'video/quicktime', 'video/x-matroska', 'video/webm'];
-            if (!validTypes.includes(file.type) && !file.name.match(/\.(mp4|avi|mov|mkv|webm)$/i)) {
-                showError('Неподдерживаемый формат файла. Используйте: MP4, AVI, MOV, MKV, WEBM');
+            // Check file type - now supports GIF
+            const validTypes = ['video/mp4', 'video/avi', 'video/quicktime', 'video/x-matroska', 'video/webm', 'image/gif'];
+            const validExtensions = /\.(mp4|avi|mov|mkv|webm|gif)$/i;
+            
+            if (!validTypes.includes(file.type) && !file.name.match(validExtensions)) {
+                showError('Неподдерживаемый формат файла. Используйте: MP4, AVI, MOV, MKV, WEBM, GIF');
                 return;
             }
 
