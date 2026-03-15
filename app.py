@@ -31,7 +31,7 @@ except ImportError as e:
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['ALLOWED_EXTENSIONS'] = {'mp4', 'avi', 'mov', 'mkv', 'webm'}
+app.config['ALLOWED_EXTENSIONS'] = {'mp4', 'avi', 'mov', 'mkv', 'webm', 'gif'}
 
 # Глобальные переменные для модели
 model = None
@@ -121,9 +121,126 @@ def load_model():
         return False
 
 
+def process_gif(gif_path):
+    """
+    Обработка GIF файла для детекции дипфейков
+    
+    Returns:
+        dict: Result dictionary with deepfake detection info
+    """
+    try:
+        from PIL import Image as PILImage
+        
+        print(f"Обработка GIF: {gif_path}")
+        
+        # Открываем GIF и извлекаем кадры
+        gif = PILImage.open(gif_path)
+        
+        predictions = []
+        sample_frame_encoded = None
+        frames_processed = 0
+        max_frames = 30  # Limit frames for performance
+        
+        # Iterate through GIF frames
+        frame_idx = 0
+        try:
+            while frame_idx < max_frames:
+                gif.seek(frame_idx)
+                
+                # Convert PIL image to numpy array (RGB)
+                frame_rgb = np.array(gif.convert('RGB'))
+                # Convert RGB to BGR for OpenCV
+                frame = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                
+                # Детектируем и обрезаем лица
+                face_crops = crop_faces(
+                    frame, 
+                    face_detector, 
+                    target_size=(config['image_size'], config['image_size']),
+                    margin=0.2
+                )
+                
+                if not face_crops:
+                    frame_idx += 1
+                    continue
+                
+                # Берем первое лицо
+                face = face_crops[0]
+                
+                # Сохраняем первый кадр для отображения
+                if sample_frame_encoded is None and frames_processed < 3:
+                    face_rgb = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
+                    pil_img = PILImage.fromarray(face_rgb)
+                    buffer = io.BytesIO()
+                    pil_img.save(buffer, format='JPEG')
+                    sample_frame_encoded = base64.b64encode(buffer.getvalue()).decode()
+                
+                # Нормализация и подготовка для модели
+                face_rgb = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
+                face_normalized = face_rgb.astype(np.float32) / 255.0
+                
+                # Нормализация ImageNet
+                mean = np.array([0.485, 0.456, 0.406])
+                std = np.array([0.229, 0.224, 0.225])
+                face_normalized = (face_normalized - mean) / std
+                
+                # Преобразуем в тензор (C, H, W)
+                face_tensor = torch.from_numpy(face_normalized).permute(2, 0, 1).float()
+                face_tensor = face_tensor.unsqueeze(0).to(device)
+                
+                # Предсказание
+                with torch.no_grad():
+                    output = model(face_tensor)
+                    prob = torch.sigmoid(output).item()
+                    predictions.append(prob)
+                
+                frames_processed += 1
+                frame_idx += 1
+                
+        except EOFError:
+            # End of GIF frames
+            pass
+        
+        if not predictions:
+            return {
+                'error': 'В GIF не обнаружены лица',
+                'is_deepfake': False,
+                'confidence': 0.0
+            }
+        
+        # Агрегация результатов
+        avg_prob = np.mean(predictions)
+        is_deepfake = avg_prob > 0.5
+        confidence = avg_prob if is_deepfake else (1 - avg_prob)
+        
+        result = {
+            'is_deepfake': bool(is_deepfake),
+            'confidence': float(confidence * 100),
+            'probabilities': {
+                'real': float((1 - avg_prob) * 100),
+                'fake': float(avg_prob * 100)
+            },
+            'frames_analyzed': len(predictions),
+            'sample_frame': sample_frame_encoded
+        }
+        
+        print(f"Результат GIF: {'ДИПФЕЙК' if is_deepfake else 'РЕАЛЬНОЕ'} (уверенность: {confidence*100:.1f}%)")
+        return result
+        
+    except Exception as e:
+        print(f"Ошибка при обработке GIF: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'error': f'Ошибка обработки GIF: {str(e)}',
+            'is_deepfake': False,
+            'confidence': 0.0
+        }
+
+
 def process_video(video_path):
     """
-    Обработка видео и определение, является ли оно дипфейком
+    Обработка видео или GIF и определение, является ли оно дипфейком
     
     Returns:
         dict: {
@@ -135,7 +252,14 @@ def process_video(video_path):
         }
     """
     try:
-        # 1. Извлечение кадров
+        # Check if file is a GIF
+        is_gif = video_path.lower().endswith('.gif')
+        
+        if is_gif:
+            # Process GIF file
+            return process_gif(video_path)
+        
+        # 1. Извлечение кадров из видео
         print(f"Обработка видео: {video_path}")
         with tempfile.TemporaryDirectory() as temp_dir:
             frame_paths = extract_frames(
@@ -269,7 +393,7 @@ def upload_video():
         return jsonify({'error': 'Файл не выбран'}), 400
     
     if not allowed_file(file.filename):
-        return jsonify({'error': 'Недопустимый формат файла. Разрешены: mp4, avi, mov, mkv, webm'}), 400
+        return jsonify({'error': 'Недопустимый формат файла. Разрешены: mp4, avi, mov, mkv, webm, gif'}), 400
     
     try:
         # Сохраняем файл
