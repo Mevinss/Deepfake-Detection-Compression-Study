@@ -81,7 +81,7 @@ def load_model():
         # Создаем модель
         print("Загрузка модели...")
         model = build_model(
-            model_name=config['model']['name'],
+            name=config['model']['name'],
             pretrained=config['model']['pretrained'],
             use_attention=config['model']['use_attention'],
             hidden_dim=config['model']['hidden_dim'],
