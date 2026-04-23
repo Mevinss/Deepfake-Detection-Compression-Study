@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 from typing import Dict, Optional
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -34,6 +35,66 @@ except ImportError:
 from src.data.dataset import DeepfakeDataset
 from src.data.preprocess import get_train_transforms, get_val_transforms
 from src.models.classifier import build_model
+
+
+class BinaryFocalLoss(nn.Module):
+    """Binary focal loss with logits for hard-example mining."""
+
+    def __init__(self, alpha: float = 0.25, gamma: float = 2.0):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        bce = nn.functional.binary_cross_entropy_with_logits(
+            logits, targets, reduction="none"
+        )
+        probs = torch.sigmoid(logits)
+        p_t = probs * targets + (1.0 - probs) * (1.0 - targets)
+        alpha_t = self.alpha * targets + (1.0 - self.alpha) * (1.0 - targets)
+        loss = alpha_t * ((1.0 - p_t) ** self.gamma) * bce
+        return loss.mean()
+
+
+def build_criterion(cfg: dict) -> nn.Module:
+    """Build loss function from training config."""
+    train_cfg = cfg.get("training", {})
+    loss_name = train_cfg.get("loss", "bce").lower()
+    if loss_name == "focal":
+        return BinaryFocalLoss(
+            alpha=float(train_cfg.get("focal_alpha", 0.25)),
+            gamma=float(train_cfg.get("focal_gamma", 2.0)),
+        )
+    return nn.BCEWithLogitsLoss()
+
+
+def apply_label_smoothing(labels: torch.Tensor, smoothing: float) -> torch.Tensor:
+    if smoothing <= 0.0:
+        return labels
+    return labels * (1.0 - smoothing) + 0.5 * smoothing
+
+
+def find_best_threshold(
+    probs: np.ndarray,
+    labels: np.ndarray,
+    metric: str = "acc",
+) -> float:
+    """Tune decision threshold on validation set."""
+    best_thr = 0.5
+    best_metric = -1.0
+    thresholds = np.linspace(0.2, 0.8, 61)
+
+    for thr in thresholds:
+        preds = (probs >= thr).astype(int)
+        if metric == "f1":
+            score = f1_score(labels, preds, zero_division=0)
+        else:
+            score = float((preds == labels).mean())
+        if score > best_metric:
+            best_metric = score
+            best_thr = float(thr)
+
+    return best_thr
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +125,10 @@ class DeepfakeLightningModule(pl.LightningModule if LIGHTNING_AVAILABLE else obj
         lr: float = 1e-4,
         weight_decay: float = 1e-4,
         epochs: int = 20,
+        criterion: Optional[nn.Module] = None,
+        label_smoothing: float = 0.0,
+        threshold_tuning: bool = True,
+        target_metric: str = "acc",
     ):
         super().__init__()
         if LIGHTNING_AVAILABLE:
@@ -75,10 +140,13 @@ class DeepfakeLightningModule(pl.LightningModule if LIGHTNING_AVAILABLE else obj
             hidden_dim=hidden_dim,
             dropout=dropout,
         )
-        self.criterion = nn.BCEWithLogitsLoss()
+        self.criterion = criterion or nn.BCEWithLogitsLoss()
         self.lr = lr
         self.weight_decay = weight_decay
         self.epochs = epochs
+        self.label_smoothing = label_smoothing
+        self.threshold_tuning = threshold_tuning
+        self.target_metric = target_metric if target_metric in {"acc", "f1"} else "acc"
 
     # ------------------------------------------------------------------ #
     # forward / step helpers                                               #
@@ -90,7 +158,9 @@ class DeepfakeLightningModule(pl.LightningModule if LIGHTNING_AVAILABLE else obj
     def _shared_step(self, batch, stage: str):
         images, labels = batch
         logits = self(images)
-        loss = self.criterion(logits, labels.float())
+        labels_float = labels.float()
+        labels_loss = apply_label_smoothing(labels_float, self.label_smoothing)
+        loss = self.criterion(logits, labels_loss)
         preds = (torch.sigmoid(logits) >= 0.5).long()
         acc = (preds == labels).float().mean()
         self.log(f"{stage}/loss", loss, on_epoch=True, prog_bar=True)
@@ -117,11 +187,26 @@ class DeepfakeLightningModule(pl.LightningModule if LIGHTNING_AVAILABLE else obj
         labels_np = all_labels.numpy()
 
         f1 = f1_score(labels_np, preds, zero_division=0)
+        acc = float((preds == labels_np).mean())
+
+        tuned_thr = 0.5
+        tuned_acc = acc
+        tuned_f1 = f1
+        if self.threshold_tuning:
+            tuned_thr = find_best_threshold(probs, labels_np, metric=self.target_metric)
+            tuned_preds = (probs >= tuned_thr).astype(int)
+            tuned_acc = float((tuned_preds == labels_np).mean())
+            tuned_f1 = float(f1_score(labels_np, tuned_preds, zero_division=0))
+
         try:
             auc = roc_auc_score(labels_np, probs)
         except ValueError:
             auc = float("nan")
 
+        self.log("val/acc_opt", tuned_acc, prog_bar=True)
+        self.log("val/f1_opt", tuned_f1, prog_bar=True)
+        self.log("val/threshold", tuned_thr, prog_bar=False)
+        self.log("val/acc", acc, prog_bar=True)
         self.log("val/f1", f1, prog_bar=True)
         self.log("val/auc", auc, prog_bar=True)
 
@@ -160,6 +245,10 @@ def train_one_epoch(
     criterion: nn.Module,
     optimizer: optim.Optimizer,
     device: torch.device,
+    scheduler: Optional[optim.lr_scheduler._LRScheduler] = None,
+    scheduler_step_mode: str = "epoch",
+    label_smoothing: float = 0.0,
+    grad_clip_norm: float = 0.0,
 ) -> Dict[str, float]:
     """Run one training epoch and return loss and accuracy."""
     model.train()
@@ -170,11 +259,16 @@ def train_one_epoch(
     for images, labels in loader:
         images = images.to(device)
         labels = labels.float().to(device)
+        labels_loss = apply_label_smoothing(labels, label_smoothing)
         optimizer.zero_grad()
         logits = model(images).squeeze(1)
-        loss = criterion(logits, labels)
+        loss = criterion(logits, labels_loss)
         loss.backward()
+        if grad_clip_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
         optimizer.step()
+        if scheduler is not None and scheduler_step_mode == "batch":
+            scheduler.step()
 
         total_loss += loss.item() * images.size(0)
         preds = (torch.sigmoid(logits) >= 0.5).long()
@@ -190,6 +284,9 @@ def evaluate(
     loader: DataLoader,
     criterion: nn.Module,
     device: torch.device,
+    threshold: float = 0.5,
+    threshold_tuning: bool = False,
+    target_metric: str = "acc",
 ) -> Dict[str, float]:
     """Evaluate model on *loader* and return loss, accuracy, F1 and AUC."""
     model.eval()
@@ -208,8 +305,13 @@ def evaluate(
     all_logits = torch.cat(all_logits)
     all_labels = torch.cat(all_labels)
     probs = torch.sigmoid(all_logits).numpy()
-    preds = (probs >= 0.5).astype(int)
     labels_np = all_labels.numpy()
+
+    used_threshold = threshold
+    if threshold_tuning:
+        used_threshold = find_best_threshold(probs, labels_np, metric=target_metric)
+
+    preds = (probs >= used_threshold).astype(int)
 
     acc = (preds == labels_np).mean()
     f1 = f1_score(labels_np, preds, zero_division=0)
@@ -219,16 +321,26 @@ def evaluate(
         auc = float("nan")
 
     return {
-        "loss": total_loss / len(all_labels),
+        "loss": total_loss / len(loader.dataset),
         "acc": float(acc),
         "f1": float(f1),
         "auc": float(auc),
+        "threshold": float(used_threshold),
     }
 
 
 def run_pure_pytorch(cfg: dict) -> None:
     """Full training loop using plain PyTorch (no Lightning required)."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    train_cfg = cfg.get("training", {})
+    target_metric = train_cfg.get("target_metric", "acc").lower()
+    target_metric = target_metric if target_metric in {"acc", "f1"} else "acc"
+    threshold_tuning = bool(train_cfg.get("threshold_tuning", True))
+    label_smoothing = float(train_cfg.get("label_smoothing", 0.0))
+    grad_clip_norm = float(train_cfg.get("grad_clip_norm", 0.0))
+    scheduler_name = train_cfg.get("scheduler", "onecycle").lower()
+    patience = int(train_cfg.get("early_stopping_patience", 8))
+
     image_size = cfg.get("image_size", 224)
 
     train_ds = DeepfakeDataset(
@@ -270,10 +382,25 @@ def run_pure_pytorch(cfg: dict) -> None:
         lr=cfg.get("lr", 1e-4),
         weight_decay=cfg.get("weight_decay", 1e-4),
     )
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=cfg.get("epochs", 20), eta_min=1e-6
-    )
-    criterion = nn.BCEWithLogitsLoss()
+    epochs = cfg.get("epochs", 20)
+    if scheduler_name == "onecycle":
+        scheduler = optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=float(train_cfg.get("max_lr", max(cfg.get("lr", 1e-4) * 5, 3e-4))),
+            epochs=epochs,
+            steps_per_epoch=len(train_loader),
+            pct_start=float(train_cfg.get("pct_start", 0.15)),
+            div_factor=10.0,
+            final_div_factor=100.0,
+        )
+        scheduler_step_mode = "batch"
+    else:
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=epochs, eta_min=1e-6
+        )
+        scheduler_step_mode = "epoch"
+
+    criterion = build_criterion(cfg)
 
     # TensorBoard writer (optional)
     try:
@@ -283,21 +410,45 @@ def run_pure_pytorch(cfg: dict) -> None:
     except ImportError:
         writer = None
 
-    best_val_f1 = 0.0
+    best_score = 0.0
+    best_threshold = 0.5
+    no_improve_epochs = 0
     ckpt_dir = Path(cfg.get("checkpoint_dir", "checkpoints"))
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     model_name = model_cfg.get("name", "mobilenetv3")
 
-    for epoch in range(1, cfg.get("epochs", 20) + 1):
-        train_metrics = train_one_epoch(model, train_loader, criterion, optimizer, device)
-        val_metrics = evaluate(model, val_loader, criterion, device)
-        scheduler.step()
+    for epoch in range(1, epochs + 1):
+        train_metrics = train_one_epoch(
+            model,
+            train_loader,
+            criterion,
+            optimizer,
+            device,
+            scheduler=scheduler,
+            scheduler_step_mode=scheduler_step_mode,
+            label_smoothing=label_smoothing,
+            grad_clip_norm=grad_clip_norm,
+        )
+        val_metrics = evaluate(
+            model,
+            val_loader,
+            criterion,
+            device,
+            threshold=best_threshold,
+            threshold_tuning=threshold_tuning,
+            target_metric=target_metric,
+        )
+        if scheduler_step_mode == "epoch":
+            scheduler.step()
+
+        current_score = val_metrics[target_metric]
 
         print(
             f"Epoch {epoch:03d} | "
             f"train loss={train_metrics['loss']:.4f} acc={train_metrics['acc']:.4f} | "
             f"val loss={val_metrics['loss']:.4f} acc={val_metrics['acc']:.4f} "
-            f"f1={val_metrics['f1']:.4f} auc={val_metrics['auc']:.4f}"
+            f"f1={val_metrics['f1']:.4f} auc={val_metrics['auc']:.4f} "
+            f"thr={val_metrics['threshold']:.2f}"
         )
 
         if writer:
@@ -306,11 +457,25 @@ def run_pure_pytorch(cfg: dict) -> None:
             for k, v in val_metrics.items():
                 writer.add_scalar(f"val/{k}", v, epoch)
 
-        if val_metrics["f1"] > best_val_f1:
-            best_val_f1 = val_metrics["f1"]
+        if current_score > best_score:
+            best_score = current_score
+            best_threshold = val_metrics["threshold"]
+            no_improve_epochs = 0
             ckpt_path = ckpt_dir / f"{model_name}_best.pth"
             torch.save(model.state_dict(), ckpt_path)
-            print(f"  ✓ Saved best model to {ckpt_path}")
+            print(
+                f"  ✓ Saved best model to {ckpt_path} "
+                f"(best {target_metric}={best_score:.4f}, thr={best_threshold:.2f})"
+            )
+        else:
+            no_improve_epochs += 1
+
+        if no_improve_epochs >= patience:
+            print(
+                f"  ✓ Early stopping at epoch {epoch}: "
+                f"no {target_metric} improvement for {patience} epochs"
+            )
+            break
 
     if writer:
         writer.close()
@@ -350,6 +515,10 @@ def run_lightning(cfg: dict) -> None:
     )
 
     model_cfg = cfg.get("model", {})
+    train_cfg = cfg.get("training", {})
+    target_metric = train_cfg.get("target_metric", "acc").lower()
+    target_metric = target_metric if target_metric in {"acc", "f1"} else "acc"
+    criterion = build_criterion(cfg)
     lit_model = DeepfakeLightningModule(
         model_name=model_cfg.get("name", "mobilenetv3"),
         pretrained=model_cfg.get("pretrained", True),
@@ -359,6 +528,10 @@ def run_lightning(cfg: dict) -> None:
         lr=cfg.get("lr", 1e-4),
         weight_decay=cfg.get("weight_decay", 1e-4),
         epochs=cfg.get("epochs", 20),
+        criterion=criterion,
+        label_smoothing=float(train_cfg.get("label_smoothing", 0.0)),
+        threshold_tuning=bool(train_cfg.get("threshold_tuning", True)),
+        target_metric=target_metric,
     )
 
     log_dir = cfg.get("log_dir", "runs")
@@ -368,12 +541,16 @@ def run_lightning(cfg: dict) -> None:
     callbacks = [
         ModelCheckpoint(
             dirpath=ckpt_dir,
-            filename=f"{model_cfg.get('name', 'model')}_{{epoch:02d}}_{{val/f1:.4f}}",
-            monitor="val/f1",
+            filename=f"{model_cfg.get('name', 'model')}_{{epoch:02d}}_{{val/acc_opt:.4f}}",
+            monitor="val/acc_opt",
             mode="max",
             save_top_k=1,
         ),
-        EarlyStopping(monitor="val/f1", patience=5, mode="max"),
+        EarlyStopping(
+            monitor="val/acc_opt",
+            patience=int(train_cfg.get("early_stopping_patience", 8)),
+            mode="max",
+        ),
     ]
 
     trainer = pl.Trainer(

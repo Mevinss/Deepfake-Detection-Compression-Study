@@ -13,7 +13,7 @@ data:
 # ─────────────────────────────────────────────────────────────────────────────
 model:
   # One of: mobilenetv3 | efficientnet_b0 | ghostnet
-  name:         mobilenetv3
+  name:         efficientnet_b0
   pretrained:   true
   use_attention: true
   hidden_dim:   256
@@ -25,9 +25,23 @@ model:
 image_size:    224
 batch_size:    32
 num_workers:   4
-epochs:        20
-lr:            0.0001
-weight_decay:  0.0001
+epochs:        35
+lr:            0.0003
+weight_decay:  0.0005
+
+training:
+  # Optimize directly for validation accuracy by default.
+  target_metric: acc
+  loss: focal
+  focal_alpha: 0.25
+  focal_gamma: 2.0
+  scheduler: onecycle
+  max_lr: 0.001
+  pct_start: 0.15
+  threshold_tuning: true
+  label_smoothing: 0.03
+  grad_clip_norm: 1.0
+  early_stopping_patience: 8
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging & checkpoints

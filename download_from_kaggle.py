@@ -7,6 +7,7 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 def download_from_kaggle():
     try:
@@ -25,6 +26,9 @@ def download_from_kaggle():
         return False
     
     print("Загрузка датасета с Kaggle...")
+
+    kaggle_exe = Path(sys.executable).parent / "kaggle.exe"
+    kaggle_cmd = str(kaggle_exe) if kaggle_exe.exists() else "kaggle"
     
     # Загружаем небольшой тестовый датасет
     datasets = [
@@ -36,7 +40,7 @@ def download_from_kaggle():
         try:
             print(f"\nЗагрузка {dataset}...")
             subprocess.run(
-                ["kaggle", "datasets", "download", "-d", dataset, "-p", "data/temp"],
+                [kaggle_cmd, "datasets", "download", "-d", dataset, "-p", "data/temp"],
                 check=True
             )
             print(f"✓ {dataset} загружен")
